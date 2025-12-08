@@ -4,6 +4,7 @@ Azure Function: OneDrive CSV parser and uploader
 
 Contents:
 - __init__.py         -> Function code (HTTP-triggered)
+- combined_csv_to_md.py -> Parsing script to convert csv files to .md
 - requirements.txt    -> Python dependencies
 - function.json       -> Function binding configuration
 - host.json           -> Host config (minimal)
