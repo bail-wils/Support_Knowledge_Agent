@@ -10,12 +10,13 @@ room_ids = {
     "MR-Products": "Y2lzY29zcGFyazovL3VzL1JPT00vY2EzYTM3ZjAtY2JjZC0xMWVjLTljY2MtNjNhYWRiMmQxZDY2",
     "MS_Classic-Products": "Y2lzY29zcGFyazovL3VzL1JPT00vMGJiZDA1YzAtNTdmNS0xMWU2LWIyYTMtYjllNjYyYWY1OGUx",
     "Catalyst_Wireless_Product": "Y2lzY29zcGFyazovL3VzL1JPT00vYjc1ZDBmYjAtMWQ5Ny0xMWVkLTllZDQtYTNhMmZiNWUwOTli",
-    "Cloud Monitoring/Catalyst_Switching_Product": "Y2lzY29zcGFyazovL3VzL1JPT00vYzY3NjRhYzAtZTZhYi0xMWVjLThjMTAtMjFkZGY1YzE1OGFj",
+    "Cloud_Monitoring_Catalyst_Switching_Product": "Y2lzY29zcGFyazovL3VzL1JPT00vYzY3NjRhYzAtZTZhYi0xMWVjLThjMTAtMjFkZGY1YzE1OGFj",
     "Cisco_Access_Manager_Products": "Y2lzY29zcGFyazovL3VzL1JPT00vYmVhZWY1NDAtZmY0OC0xMWVmLWEwODUtYzU5NjNmM2IyY2Fh",
     "Cisco_Access_Manager": "Y2lzY29zcGFyazovL3VzL1JPT00vZWZkMzVkNjAtMzZmOC0xMWVlLTg3OTgtZjVlNTczNjNjOTI3",
     "Umbrella_Meraki_Support_Collaboration": "Y2lzY29zcGFyazovL3VzL1JPT00vNmFkZmIyMzAtYzE4Yy0xMWVjLTk4ZGEtNDVmYWQ4MTkwNmFh",
     "API": "Y2lzY29zcGFyazovL3VzL1JPT00vMTE4ZDVkNjAtNTdmNS0xMWU2LTk5MzktNzM3ZTA0NmZhYzU5",
     "CNHE_Support_Space_CSC": "Y2lzY29zcGFyazovL3VzL1JPT00vZjhmZjkzMzAtODFlYi0xMWVkLWFiODctMjFmNThmMjEwZDI1",
+    "MX-Products": "Y2lzY29zcGFyazovL3VzL1JPT00vMGE4ZWJlZjAtNTdmNS0xMWU2LTk1NjItOTFiMDhhODkwZDg3"
     }
 
 headers = {
