@@ -39,8 +39,9 @@ from playwright.sync_api import sync_playwright
 import csv
 import re
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from bs4 import BeautifulSoup
+from email.utils import parsedate_to_datetime
 
 
 # -----------------------------------------------------------------------------
@@ -89,8 +90,8 @@ def create_urls_from_csv(csv_file_path):
 
             metadata[ui_url] = {
                 "id": row.get('ID'),
-                "title": row.get('TITLE', 'document'),
-                "last_updated": row.get('LAST_UPDATED', '1970-01-01')
+                "title": row.get('TITLE', 'document'), # title = 'document' if TITLE in row is NULL/empty
+                "last_updated": row.get('LAST_UPDATED', '1970-01-01') #  last_updated = '1970-01-01' if 'LAST_UPDATED' in row is NULL/empty
             }
 
     return urls, metadata
@@ -108,27 +109,53 @@ def html_to_markdown(article):
     - Headings (h1–h4 → #–####)
     - Code blocks (<pre>)
     - Paragraph text
+    - Internal-only sections (Meraki confidential). Internal-only sections are clearly marked so they can be filtered, flagged, or restricted in downstream AI pipelines.
 
     This structure dramatically improves AI chunking and retrieval quality.
     """
     md_lines = []
 
+
     for elem in article.descendants:
+        # -----------------------------
+        # Headings
+        # -----------------------------
         if elem.name in ['h1', 'h2', 'h3', 'h4']:
             level = int(elem.name[1])
-            md_lines.append(f"{'#' * level} {elem.get_text(strip=True)}\n")
+            md_lines.append(f"{'#' * level} {elem.get_text(strip=True)}")
 
+
+        # -----------------------------
+        # Code blocks
+        # -----------------------------
         elif elem.name == 'pre':
             code = elem.get_text()
-            md_lines.append("```\n" + code + "\n```\n")
+            md_lines.append("```" + code + "```")
 
+        # -----------------------------
+        # Internal-only (Meraki confidential)
+        # -----------------------------
+        elif elem.name == 'div' and 'internal-only' in (elem.get('class') or []):
+            internal_text = elem.get_text("", strip=True)
+            if internal_text:
+                md_lines.append("> **Internal Only – Meraki Confidential**>"+ "".join(f"> {line}" for line in internal_text.splitlines())+ "")
+
+
+        # -----------------------------
+        # Paragraphs (skip if nested in internal-only div to avoid duplication)
+        # -----------------------------
         elif elem.name == 'p':
+            parent = elem.parent
+            if parent and parent.name == 'div' and 'internal-only' in (parent.get('class') or []):
+                continue
+
+
             text = elem.get_text(strip=True)
             if text:
-                md_lines.append(text + "\n")
+                md_lines.append(text + "")
 
-    return "\n".join(md_lines)
 
+    return "\n\n".join(md_lines)
 
 # -----------------------------------------------------------------------------
 # MAIN PROGRAM
@@ -142,14 +169,19 @@ STATE_FILE = 'last_run.txt'
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, 'r') as f:
         last_run = datetime.fromisoformat(f.read().strip())
+        print(f"last_run found: {last_run}")
+
 else:
-    last_run = datetime.fromisoformat('1970-01-01T00:00:00')
+    print("No last_run.txt found. Beginning fresh run")
+    last_run = datetime.fromisoformat('1970-01-01T00:00:00+00:00')
 
 os.makedirs('markdown_docs', exist_ok=True)
 
 with sync_playwright() as p:
+    print("Launching Chrome browser")
+
     browser = p.chromium.launch(
-        executable_path='C:\Program Files\Google\Chrome\Application\chrome.exe',
+        executable_path='C:/Program Files/Google/Chrome/Application/chrome.exe',
         headless=False
     )
     context = browser.new_context()
@@ -162,24 +194,36 @@ with sync_playwright() as p:
     # scripted steps. Once authenticated, the browser context can access
     # protected documentation pages.
     # -------------------------------------------------------------------------
+    print("Beginning Mindtouch authentication")
 
-    page.goto("https://meraki.okta.com/oauth2/v1/authorize?...REDACTED...")
-    page.wait_for_load_state('networkidle')
+    page.goto("https://meraki.okta.com/oauth2/v1/authorize?client_id=okta.2b1959c8-bcc0-56eb-a589-cfcfb7422f26&code_challenge=jDrhYDukWpnhpf2ow5W1YEXKIyUAimrs4JBUKyAAlUA&code_challenge_method=S256&nonce=TfFG2pJjrpHwN1RUAjoGbZtuWj6P6fWS5NZ0QUtL6EMe3hgnGpeyIbgqRKdRQ5ZP&redirect_uri=https%3A%2F%2Fmeraki.okta.com%2Fenduser%2Fcallback&response_type=code&state=5yYwzPP9rkBOv5nF32ol9BJqk5RuzSjxu3KK23FqWJjXf99xM0VNjHhGqML7de03&scope=openid%20profile%20email%20okta.users.read.self%20okta.users.manage.self%20okta.internal.enduser.read%20okta.internal.enduser.manage%20okta.enduser.dashboard.read%20okta.enduser.dashboard.manage%20okta.myAccount.sessions.manage%20okta.internal.navigation.enduser.read")
+    # Fill username and password
+    page.fill('input#input28', 'bailey.wilson')
+    page.click('input.button-primary[type="submit"][value="Next"]')
+    page.fill('input[aria-label="Email Address"]', 'bailwils@cisco.com')
+    page.click('button.c--primary.primary.align-flex-items-center.align-flex-justify-content-start.input__width-full.size-margin-top-medium.button--xlarge[type="button"]');
+    
+    print("Please complete Okta/Duo authentication in the browser.")
+    print("Once the MindTouch documentation page loads, press ENTER here.")
+
+    page.wait_for_load_state("networkidle") 
+    input("Press ENTER to continue after login...")
+
 
     for url in urls:
         meta = metadata.get(url, {})
-        last_updated = datetime.fromisoformat(meta.get('last_updated'))
+        last_updated = parsedate_to_datetime(meta.get('last_updated'))
 
         # Skip documents that have not changed since last run
         if last_updated <= last_run:
             continue
 
-        page.goto(url)
-        page.wait_for_load_state('networkidle')
-
         title = meta.get('title', 'document').strip()
         if contains_japanese(title):
             continue
+
+        page.goto(url)
+        page.wait_for_load_state('networkidle')
 
         html = page.content()
         soup = BeautifulSoup(html, 'html.parser')
@@ -207,7 +251,7 @@ with sync_playwright() as p:
             f"last_updated: {meta.get('last_updated')}\n"
             f"doc_id: {doc_id}\n"
             f"version: {version}\n"
-            f"scraped_at: {datetime.utcnow().isoformat()}Z\n"
+            f"scraped_at: {datetime.now(timezone.utc).isoformat()}Z\n"
             "---\n\n"
         )
 
@@ -221,7 +265,7 @@ with sync_playwright() as p:
 
 # Update last run timestamp only after successful completion
 with open(STATE_FILE, 'w') as f:
-    f.write(datetime.utcnow().isoformat())
+    f.write(datetime.now(timezone.utc).isoformat())
 
 
 """
