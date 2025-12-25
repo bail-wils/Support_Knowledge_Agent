@@ -133,6 +133,27 @@ def html_to_markdown(article):
             md_lines.append("```" + code + "```")
 
         # -----------------------------
+        # Unordered lists
+        # -----------------------------
+        elif elem.name == 'ul':
+            for li in elem.find_all('li', recursive=False):
+                text = li.get_text(strip=True)
+                if text:
+                    md_lines.append(f"- {text}")
+            md_lines.append("")
+
+
+        # -----------------------------
+        # Ordered lists
+        # -----------------------------
+        elif elem.name == 'ol':
+            for idx, li in enumerate(elem.find_all('li', recursive=False), start=1):
+                text = li.get_text(strip=True)
+                if text:
+                    md_lines.append(f"{idx}. {text}")
+            md_lines.append("")
+
+        # -----------------------------
         # Internal-only (Meraki confidential)
         # -----------------------------
         elif elem.name == 'div' and 'internal-only' in (elem.get('class') or []):
