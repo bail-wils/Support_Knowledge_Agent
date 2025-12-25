@@ -103,80 +103,201 @@ def create_urls_from_csv(csv_file_path):
 
 def html_to_markdown(article):
     """
-    Converts the main HTML article content into Markdown.
+    Convert a MindTouch <article> element into clean, structured Markdown.
 
-    Preserves:
-    - Headings (h1–h4 → #–####)
-    - Code blocks (<pre>)
-    - Paragraph text
-    - Internal-only sections (Meraki confidential). Internal-only sections are clearly marked so they can be filtered, flagged, or restricted in downstream AI pipelines.
+    Design goals:
+    - Preserve document structure (headings, lists, tables, code)
+    - Preserve nested lists with correct indentation
+    - Avoid duplicate rendering caused by recursive DOM traversal
+    - Explicitly mark internal-only content
+    - Be deterministic and AI-ingestion friendly
 
-    This structure dramatically improves AI chunking and retrieval quality.
+    IMPORTANT:
+    MindTouch pages nest nearly all real content inside wrapper <div>s.
+    We must traverse recursively, but carefully guard against reprocessing
+    elements that are already handled by parent renderers.
     """
+
     md_lines = []
 
+    # -----------------------------
+    # Helper: render unordered lists (supports nesting)
+    # -----------------------------
+    def render_ul(ul_elem, indent=0):
+        for li in ul_elem.find_all('li', recursive=False):
+            prefix = '  ' * indent + '- '
 
-    for elem in article.descendants:
-        # -----------------------------
+            # Extract only the text belonging to THIS list item,
+            # excluding any nested <ul>/<ol> which will be rendered separately
+            text_parts = []
+            for child in li.contents:
+                if getattr(child, 'name', None) not in ['ul', 'ol']:
+                    if hasattr(child, 'get_text'):
+                        text_parts.append(child.get_text(strip=True))
+                    else:
+                        text_parts.append(str(child).strip())
+
+            text = ' '.join(filter(None, text_parts))
+            if text:
+                md_lines.append(prefix + text)
+
+            # Recursively render nested lists
+            for nested_ul in li.find_all('ul', recursive=False):
+                render_ul(nested_ul, indent + 1)
+
+            for nested_ol in li.find_all('ol', recursive=False):
+                render_ol(nested_ol, indent + 1)
+
+    # -----------------------------
+    # Helper: render ordered lists (supports nesting)
+    # -----------------------------
+    def render_ol(ol_elem, indent=0):
+        for idx, li in enumerate(ol_elem.find_all('li', recursive=False), start=1):
+            prefix = '  ' * indent + f"{idx}. "
+
+            text_parts = []
+            for child in li.contents:
+                if getattr(child, 'name', None) not in ['ul', 'ol']:
+                    if hasattr(child, 'get_text'):
+                        text_parts.append(child.get_text(strip=True))
+                    else:
+                        text_parts.append(str(child).strip())
+
+            text = ' '.join(filter(None, text_parts))
+            if text:
+                md_lines.append(prefix + text)
+
+            for nested_ul in li.find_all('ul', recursive=False):
+                render_ul(nested_ul, indent + 1)
+
+            for nested_ol in li.find_all('ol', recursive=False):
+                render_ol(nested_ol, indent + 1)
+
+    # -----------------------------
+    # Main traversal
+    # -----------------------------
+    for elem in article.find_all(['h1', 'h2', 'h3', 'h4', 'p', 'ul', 'ol', 'table', 'pre', 'div'],recursive=True):
+        # ---------------------------------
+        # GUARD 1: Never render <li> directly
+        #
+        # Reason:
+        # List items are always rendered by render_ul/render_ol.
+        # Rendering them here would cause duplication and flattening.
+        # ---------------------------------
+        if elem.name == 'li':
+            continue
+
+        # ---------------------------------
+        # GUARD 2: Skip nested lists
+        #
+        # Reason:
+        # Nested <ul>/<ol> are rendered recursively by their parent list.
+        # Encountering them again during traversal would duplicate content.
+        # ---------------------------------
+        if elem.name in ['ul', 'ol'] and elem.find_parent(['ul', 'ol']):
+            continue
+
+        # ---------------------------------
+        # GUARD 3: Skip paragraphs inside lists
+        #
+        # Reason:
+        # <p> tags sometimes appear inside <li>.
+        # Their text is already captured when rendering the list item.
+        # ---------------------------------
+        if elem.name == 'p' and elem.find_parent(['ul', 'ol']):
+            continue
+
+        # ---------------------------------
+        # GUARD 4: Skip anything inside a table
+        #
+        # Reason:
+        # Table content is fully rendered when we process <table>.
+        # Rendering descendants (<tr>, <td>, <th>, text) would duplicate content.
+        # ---------------------------------
+        if elem.find_parent('table'):
+            continue
+
+        # ---------------------------------
         # Headings
-        # -----------------------------
+        # ---------------------------------
         if elem.name in ['h1', 'h2', 'h3', 'h4']:
             level = int(elem.name[1])
             md_lines.append(f"{'#' * level} {elem.get_text(strip=True)}")
+            md_lines.append("")
+            continue
 
-
-        # -----------------------------
+        # ---------------------------------
         # Code blocks
-        # -----------------------------
-        elif elem.name == 'pre':
+        # ---------------------------------
+        if elem.name == 'pre':
             code = elem.get_text()
-            md_lines.append("```" + code + "```")
-
-        # -----------------------------
-        # Unordered lists
-        # -----------------------------
-        elif elem.name == 'ul':
-            for li in elem.find_all('li', recursive=False):
-                text = li.get_text(strip=True)
-                if text:
-                    md_lines.append(f"- {text}")
+            md_lines.append("```")
+            md_lines.append(code.rstrip())
+            md_lines.append("```")
             md_lines.append("")
+            continue
 
-
-        # -----------------------------
-        # Ordered lists
-        # -----------------------------
-        elif elem.name == 'ol':
-            for idx, li in enumerate(elem.find_all('li', recursive=False), start=1):
-                text = li.get_text(strip=True)
-                if text:
-                    md_lines.append(f"{idx}. {text}")
-            md_lines.append("")
-
-        # -----------------------------
-        # Internal-only (Meraki confidential)
-        # -----------------------------
-        elif elem.name == 'div' and 'internal-only' in (elem.get('class') or []):
-            internal_text = elem.get_text("", strip=True)
-            if internal_text:
-                md_lines.append("> **Internal Only – Meraki Confidential**>"+ "".join(f"> {line}" for line in internal_text.splitlines())+ "")
-
-
-        # -----------------------------
-        # Paragraphs (skip if nested in internal-only div to avoid duplication)
-        # -----------------------------
-        elif elem.name == 'p':
-            parent = elem.parent
-            if parent and parent.name == 'div' and 'internal-only' in (parent.get('class') or []):
+        # ---------------------------------
+        # Tables
+        # ---------------------------------
+        if elem.name == 'table':
+            rows = elem.find_all('tr')
+            if not rows:
                 continue
 
+            for r_idx, row in enumerate(rows):
+                cells = row.find_all(['th', 'td'])
+                cell_text = [c.get_text(strip=True) for c in cells]
+                if not cell_text:
+                    continue
 
+                md_lines.append("| " + " | ".join(cell_text) + " |")
+
+                # Header separator after first row
+                if r_idx == 0:
+                    md_lines.append("| " + " | ".join(['---'] * len(cell_text)) + " |")
+
+            md_lines.append("")
+            continue
+
+        # ---------------------------------
+        # Internal-only (Meraki confidential)
+        # ---------------------------------
+        if elem.name == 'div' and 'internal-only' in (elem.get('class') or []):
+            internal_text = elem.get_text("\n", strip=True)
+            if internal_text:
+                md_lines.append("> **Internal Only – Meraki Confidential**")
+                md_lines.append(">")
+                for line in internal_text.splitlines():
+                    md_lines.append(f"> {line}")
+                md_lines.append("")
+            continue
+
+        # ---------------------------------
+        # Lists (top-level only)
+        # ---------------------------------
+        if elem.name == 'ul':
+            render_ul(elem)
+            md_lines.append("")
+            continue
+
+        if elem.name == 'ol':
+            render_ol(elem)
+            md_lines.append("")
+            continue
+
+        # ---------------------------------
+        # Paragraphs (default text)
+        # ---------------------------------
+        if elem.name == 'p':
             text = elem.get_text(strip=True)
             if text:
-                md_lines.append(text + "")
+                md_lines.append(text)
+                md_lines.append("")
+            continue
 
+    return "\n".join(md_lines).strip()
 
-    return "\n\n".join(md_lines)
 
 # -----------------------------------------------------------------------------
 # MAIN PROGRAM
