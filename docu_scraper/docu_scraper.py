@@ -39,7 +39,7 @@ from playwright.sync_api import sync_playwright
 import csv
 import re
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 
@@ -222,8 +222,15 @@ with sync_playwright() as p:
         if contains_japanese(title):
             continue
 
-        page.goto(url)
-        page.wait_for_load_state('networkidle')
+        for attempt in range(3):
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_selector("article", timeout=30000)
+                break
+            except TimeoutError:
+                if attempt == 2:
+                    raise
+                time.sleep(3)
 
         html = page.content()
         soup = BeautifulSoup(html, 'html.parser')
